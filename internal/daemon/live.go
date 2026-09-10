@@ -77,7 +77,9 @@ func (a *App) createLive(ctx context.Context, sdp string) (json.RawMessage, erro
 		return nil, errors.New("a voice session already exists; disconnect it first")
 	}
 	// Reserve the slot before making the billable request.
-	placeholder := &Live{}
+	ctx, cancelCreation := context.WithCancel(ctx)
+	defer cancelCreation()
+	placeholder := &Live{cancel: cancelCreation}
 	a.live = placeholder
 	parent := a.ctx
 	a.mu.Unlock()
@@ -175,7 +177,13 @@ func (l *Live) Update(text string, speak bool) {
 	}
 }
 func (l *Live) Close() {
-	if l == nil || l.conn == nil {
+	if l == nil {
+		return
+	}
+	if l.conn == nil {
+		if l.cancel != nil {
+			l.cancel()
+		}
 		return
 	}
 	l.closeOnce.Do(func() {

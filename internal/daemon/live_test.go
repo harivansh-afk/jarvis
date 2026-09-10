@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,47 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+func TestDisconnectCancelsPendingVoiceCreation(t *testing.T) {
+	started := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer provider.Close()
+	a := newTestApp(t, &fakeTerminal{})
+	a.cfg.APIKey = "test-project-key"
+	a.cfg.APIBase = provider.URL
+	a.cfg.HTTPClient = provider.Client()
+	result := make(chan error, 1)
+	go func() {
+		_, err := a.createLive(context.Background(), "offer")
+		result <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("creation did not reach provider")
+	}
+	a.mu.Lock()
+	pending := a.live
+	a.mu.Unlock()
+	pending.Close()
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("cancelled creation succeeded")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("disconnect did not cancel creation")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.live != nil {
+		t.Fatal("voice reservation was not released")
+	}
+}
 
 func TestManagedLiveToolRoundTripAndDuplicateSuppression(t *testing.T) {
 	calls := make(chan map[string]any, 4)
