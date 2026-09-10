@@ -1,0 +1,6 @@
+.worktrees/
+/result
+/jarvisd
+*.db
+*.db-*
+
