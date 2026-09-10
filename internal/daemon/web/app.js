@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 let state, selected, inspection, events, peer, media, dataChannel, heartbeat, polling, starting = false;
 let transcriptLine, transcriptKind;
+let voiceError = '';
 function error(message) { $('error').textContent = message; $('error').hidden = !message; }
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
@@ -21,7 +22,7 @@ async function refresh() {
   $('connection').textContent = state.mux_connected ? 'Spark connected' : 'Waiting for Mux'; $('connection').classList.toggle('online', state.mux_connected);
   $('count').textContent = state.terminals.length; $('empty').hidden = state.terminals.length > 0;
   $('voice').disabled = starting || (!peer && !state.voice_configured);
-  if (!peer) $('voice-status').textContent = state.voice_configured ? `${state.backend_model} · ready to talk` : 'OpenAI project key needed for voice';
+  if (!peer) $('voice-status').textContent = voiceError || (state.voice_configured ? `${state.backend_model} · ready to talk` : 'OpenAI project key needed for voice');
   $('terminals').replaceChildren();
   for (const t of state.terminals) {
     const button = document.createElement('button'); button.className = 'pane' + (selected === t.name ? ' active' : '');
@@ -73,11 +74,17 @@ $('input-form').addEventListener('submit', async event => {
 function cleanupVoice() {
   clearInterval(heartbeat); heartbeat = null; media?.getTracks().forEach(t => t.stop()); media = null;
   peer?.close(); peer = null; dataChannel = null; $('audio').srcObject = null; $('audio').hidden = true;
-  $('voice').textContent = 'Start conversation ↗'; $('voice').disabled = !state?.voice_configured; $('voice-status').textContent = 'Voice is disconnected'; $('mute').hidden = true; starting = false;
+  $('voice').textContent = 'Start conversation ↗'; $('voice').disabled = !state?.voice_configured; $('voice-status').textContent = voiceError || 'Voice is disconnected'; $('mute').hidden = true; starting = false;
 }
 async function stopVoice() { try { await api('/api/voice', { method: 'DELETE' }); } finally { cleanupVoice(); } }
+function voiceFailure(e) {
+  if (e.name === 'NotAllowedError') return 'Microphone access was denied. Allow it in this browser’s site settings and try again.';
+  if (e.name === 'NotFoundError') return 'No microphone was found. Select an available input device in your browser or system settings.';
+  if (e.name === 'NotReadableError') return 'The microphone could not be opened. Check your input device and try again.';
+  return e.message || 'The voice connection failed.';
+}
 async function startVoice() {
-  starting = true; $('voice').disabled = true; $('voice-status').textContent = 'Connecting…'; error('');
+  voiceError = ''; starting = true; $('voice').disabled = true; $('voice-status').textContent = 'Connecting…'; error('');
   try {
     if (!window.isSecureContext) throw new Error('Microphone access needs HTTPS or localhost.');
     media = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -92,7 +99,7 @@ async function startVoice() {
     const result = await api('/api/voice', { method: 'POST', body: JSON.stringify({ sdp: current.localDescription.sdp }) });
     await current.setRemoteDescription({ type: 'answer', sdp: result.transport.sdp });
     heartbeat = setInterval(() => api('/api/voice/heartbeat', { method: 'POST', body: '{}' }).catch(() => stopVoice().catch(() => {})), 10000);
-  } catch(e) { error(e.message); await stopVoice().catch(() => {}); }
+  } catch(e) { voiceError = voiceFailure(e); error(voiceError); await stopVoice().catch(() => {}); }
 }
 $('voice').addEventListener('click', () => (peer ? stopVoice() : startVoice()).catch(e => error(e.message)));
 $('mute').addEventListener('click', () => { const track = media?.getAudioTracks()[0]; if (track) { track.enabled = !track.enabled; $('mute').textContent = track.enabled ? 'Mute microphone' : 'Unmute microphone'; } });

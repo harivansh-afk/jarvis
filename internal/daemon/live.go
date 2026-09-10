@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -110,6 +111,10 @@ func (a *App) createLive(ctx context.Context, sdp string) (json.RawMessage, erro
 		return nil, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		slog.Warn("Live session creation rejected", "status", response.StatusCode, "request_id", response.Header.Get("x-request-id"), "edge_id", response.Header.Get("cf-ray"))
+		if response.StatusCode >= 500 {
+			return nil, fmt.Errorf("OpenAI could not create the voice session (HTTP %d). Try again shortly", response.StatusCode)
+		}
 		return nil, fmt.Errorf("OpenAI rejected session creation (HTTP %d); check project access and model configuration", response.StatusCode)
 	}
 	var created struct {
