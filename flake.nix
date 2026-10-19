@@ -21,7 +21,7 @@
             pname = "jarvis";
             version = "0.1.0";
             src = pkgs.lib.cleanSource ./.;
-            vendorHash = "sha256-c0KNwoIeKz75NIFfMDjkNJE6hIedzg1BlE9hQqyOTj0=";
+            vendorHash = "sha256-h+X1PCtjeMu6V/19QwwyrNEkFP0d8VboYhEzcmmLzSc=";
             subPackages = [ "cmd/jarvisd" ];
             env.CGO_ENABLED = 1;
             doCheck = true;
